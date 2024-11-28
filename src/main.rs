@@ -3,10 +3,13 @@
 //! crunch seamlessly integrates cutting-edge hardware into your local development environment.
 
 use clap::{command, Parser};
+use env_logger;
 use log::{debug, error, info};
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
     process::{exit, Command, Stdio},
+    sync::{Arc, Mutex},
+    thread,
 };
 
 #[derive(Debug, Clone)]
@@ -40,34 +43,65 @@ struct Args {
     hidden: bool,
 
     /// Path or directory to exclude from the remote server transfer.
-    /// Specify multiple using delimiter ','. Supports regex glob patterns.
+    /// Specify multiple entries using delimiter ','.
     ///
     /// Example: `--exclude "cat.png,*.lock,mocks/**/*.db"`
     #[arg(long = "exclude", required = false, value_delimiter = ',')]
     exclude: Vec<String>,
 
+    /// A command to execute on the machine after the cargo command has finished executing.
+    ///
+    /// Example: `--post-cargo "cd target/release && profile my-binary"`
+    #[arg(long = "post-cargo", required = false)]
+    post_cargo: Option<String>,
+
+    /// Path or directory to sync back from the remote server after all other work has been done.
+    /// Each entry should be in the format `source:destination`. Specify multiple entries using delimiter ','.
+    ///
+    /// Example: `--copy-back "./target/release/cuter-cat.png:.,*.bin:~/my-bins"`
+    #[arg(long = "copy-back", required = false, value_delimiter = ',')]
+    copy_back: Vec<String>,
+
     /// The cargo command to execute
+    ///
+    /// Example: `build --release`
     #[arg(required = true, num_args = 1..)]
     command: Vec<String>,
 }
 
 fn main() {
-    let args = Args::parse();
+    env_logger::builder()
+        .filter_level(log::LevelFilter::Info)
+        .init();
 
+    let args = Args::parse();
     debug!("{:?}", &args);
+
+    let copy_back_pairs: Vec<(String, String)> = args
+        .copy_back
+        .into_iter()
+        .filter_map(|entry| {
+            let mut parts = entry.splitn(2, ':');
+            match (parts.next(), parts.next()) {
+                (Some(source), Some(dest)) => Some((source.to_string(), dest.to_string())),
+                _ => {
+                    panic!("Invalid format for --copy-back entry: {}", entry);
+                }
+            }
+        })
+        .collect();
 
     let mut metadata_cmd = cargo_metadata::MetadataCommand::new();
     metadata_cmd.manifest_path("Cargo.toml").no_deps();
 
     let project_metadata = metadata_cmd.exec().unwrap();
     let project_dir = project_metadata.workspace_root;
-    info!("Project dir: {:?}", project_dir);
 
     let remote = Remote {
         name: "crunch".to_string(),
         host: "crunch-ax102".to_string(),
         ssh_port: 22,
-        temp_dir: "/tmp".to_string(),
+        temp_dir: "~/crunch-builds".to_string(),
         env: "~/.profile".to_string(),
     };
 
@@ -99,9 +133,10 @@ fn main() {
 
     rsync_to
         .arg("--rsync-path")
-        .arg("mkdir -p remote-builds && rsync")
+        .arg(format!("mkdir -p {} && rsync", build_path))
         .arg(format!("{}/", project_dir.to_string_lossy()))
         .arg(format!("{}:{}", build_server, build_path))
+        .env("LC_ALL", "C.UTF-8")
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .stdin(Stdio::inherit())
@@ -111,8 +146,6 @@ fn main() {
             exit(-4);
         });
     info!("Build ENV: {:?}", args.build_env);
-    info!("Environment profile: {:?}", remote.env);
-    info!("Build path: {:?}", build_path);
 
     let build_command = format!(
         "export CC=gcc; export CXX=g++; source {}; cd {}; {} cargo {}",
@@ -122,12 +155,21 @@ fn main() {
         args.command.join(" "),
     );
 
-    info!("Starting build process.");
+    // Add the post_cargo command to the build_command, if it exists
+    let command = if let Some(post_cargo) = args.post_cargo {
+        format!(
+            "{} && echo Executing post-cargo command && {}",
+            build_command, post_cargo
+        )
+    } else {
+        build_command
+    };
     let _output = Command::new("ssh")
+        .env("LC_ALL", "C.UTF-8")
         .args(&["-p", &remote.ssh_port.to_string()])
         .arg("-t")
         .arg(&build_server)
-        .arg(build_command)
+        .arg(command)
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .stdin(Stdio::inherit())
@@ -136,4 +178,75 @@ fn main() {
             error!("Failed to run cargo command remotely (error: {})", e);
             exit(-5);
         });
+
+    if !copy_back_pairs.is_empty() {
+        info!("Transferring artifacts back to the local machine.");
+
+        let errors = Arc::new(Mutex::new(Vec::new()));
+        let threads: Vec<_> = copy_back_pairs
+            .into_iter()
+            .map(|(remote_source, local_dest)| {
+                let errors = Arc::clone(&errors);
+                let build_server = build_server.clone();
+                let build_path = build_path.clone();
+                thread::spawn(move || {
+                    let mut rsync_back = Command::new("rsync");
+                    rsync_back
+                        .arg("-a")
+                        .arg("--compress")
+                        .arg("-e")
+                        .arg(format!("ssh -p {}", remote.ssh_port))
+                        .arg("--info=progress2")
+                        .arg(format!(
+                            "{}:{}/{}",
+                            &build_server, build_path, remote_source
+                        ))
+                        .arg(format!("{}/", local_dest))
+                        .env("LC_ALL", "C.UTF-8")
+                        .stdout(Stdio::inherit())
+                        .stderr(Stdio::inherit())
+                        .stdin(Stdio::inherit());
+
+                    let output = rsync_back.output();
+
+                    match output {
+                        Ok(result) if result.status.success() => {
+                            info!(
+                                "Successfully transferred '{}' to '{}'",
+                                remote_source, local_dest
+                            );
+                        }
+                        Ok(result) => {
+                            let message = format!(
+                                "Rsync failed for '{}' to '{}' with exit code: {}",
+                                remote_source, local_dest, result.status
+                            );
+                            error!("{}", message);
+                            errors.lock().unwrap().push(message);
+                        }
+                        Err(e) => {
+                            let message = format!(
+                                "Failed to transfer '{}' to '{}' (error: {})",
+                                remote_source, local_dest, e
+                            );
+                            error!("{}", message);
+                            errors.lock().unwrap().push(message);
+                        }
+                    }
+                })
+            })
+            .collect();
+
+        for thread in threads {
+            thread.join().unwrap();
+        }
+
+        let errors = errors.lock().unwrap();
+        if !errors.is_empty() {
+            for error in errors.iter() {
+                eprintln!("{}", error);
+            }
+            exit(-6);
+        }
+    }
 }
