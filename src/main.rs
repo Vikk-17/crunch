@@ -39,6 +39,13 @@ struct Args {
     #[arg(long, required = false)]
     hidden: bool,
 
+    /// Path or directory to exclude from the remote server transfer.
+    /// Specify multiple using delimiter ','. Supports regex glob patterns.
+    ///
+    /// Example: `--exclude "cat.png,*.lock,mocks/**/*.db"`
+    #[arg(long = "exclude", required = false, value_delimiter = ',')]
+    exclude: Vec<String>,
+
     /// The cargo command to execute
     #[arg(required = true, num_args = 1..)]
     command: Vec<String>,
@@ -85,6 +92,10 @@ fn main() {
     if !args.hidden {
         rsync_to.arg("--exclude").arg(".*");
     }
+
+    args.exclude.iter().for_each(|exclude| {
+        rsync_to.arg("--exclude").arg(exclude);
+    });
 
     rsync_to
         .arg("--rsync-path")
