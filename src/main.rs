@@ -111,7 +111,7 @@ fn main() {
     project_dir.hash(&mut hasher);
     let build_path = format!("{}/{}/", remote.temp_dir, hasher.finish());
 
-    info!("Transferring sources to build server.");
+    info!("Transferring sources to remote: {}", build_path);
     let mut rsync_to = Command::new("rsync");
     rsync_to
         .arg("-a".to_owned())
@@ -145,7 +145,6 @@ fn main() {
             error!("Failed to transfer project to build server (error: {})", e);
             exit(-4);
         });
-    info!("Build ENV: {:?}", args.build_env);
 
     let build_command = format!(
         "export CC=gcc; export CXX=g++; source {}; cd {}; {} cargo {}",
