@@ -99,7 +99,7 @@ fn main() {
 
     let remote = Remote {
         name: "crunch".to_string(),
-        host: "crunch-ax102".to_string(),
+        host: "crunch".to_string(),
         ssh_port: 22,
         temp_dir: "~/crunch-builds".to_string(),
         env: "~/.profile".to_string(),
