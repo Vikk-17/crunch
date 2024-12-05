@@ -38,7 +38,9 @@ struct Args {
     )]
     build_env: String,
 
-    /// Whether to include hidden files to the remote server transfer
+    /// Whether to include hidden files to the remote server transfer.
+    ///
+    /// Note the `.cargo` directory is not impacted by this flag and will always be transferred.
     #[arg(long, required = false)]
     hidden: bool,
 
@@ -124,6 +126,7 @@ fn main() {
         .arg("target");
 
     if !args.hidden {
+        rsync_to.arg("--include").arg(".cargo/");
         rsync_to.arg("--exclude").arg(".*");
     }
 
