@@ -1,12 +1,12 @@
 [package]
 name = "crunch-app"
-version = "0.0.8"
+version = "0.0.9"
 edition = "2021"
 description = "Turbocharge your Rust workflow with crunch"
 license = "MIT"
 
 [dependencies]
-cargo_metadata = "0.8.0"
+cargo_metadata = "0.19.1"
 log = "0.4.1"
 xdg = "2.1.0"
 serde = { version = "1.0", features = ["derive"] }

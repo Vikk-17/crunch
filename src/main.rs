@@ -38,17 +38,18 @@ struct Args {
     )]
     build_env: String,
 
-    /// Whether to include hidden files to the remote server transfer.
-    ///
-    /// Note the `.cargo` directory is not impacted by this flag and will always be transferred.
-    #[arg(long, required = false)]
-    hidden: bool,
-
     /// Path or directory to exclude from the remote server transfer.
     /// Specify multiple entries using delimiter ','.
     ///
-    /// Example: `--exclude "cat.png,*.lock,mocks/**/*.db"`
-    #[arg(long = "exclude", required = false, value_delimiter = ',')]
+    /// By default the `target` and `.git` directories are excluded.
+    ///
+    /// Example: `--exclude "target,.git,cat.png,*.lock,mocks/**/*.db"`
+    #[arg(
+        long = "exclude",
+        required = false,
+        value_delimiter = ',',
+        default_value = "target,.git"
+    )]
     exclude: Vec<String>,
 
     /// A command to execute on the machine after the cargo command has finished executing.
@@ -128,11 +129,6 @@ fn main() {
         .arg("--exclude")
         .arg("target");
 
-    if !args.hidden {
-        rsync_to.arg("--include").arg(".cargo/");
-        rsync_to.arg("--exclude").arg(".*");
-    }
-
     args.exclude.iter().for_each(|exclude| {
         rsync_to.arg("--exclude").arg(exclude);
     });
@@ -140,7 +136,7 @@ fn main() {
     rsync_to
         .arg("--rsync-path")
         .arg(format!("mkdir -p {} && rsync", build_path))
-        .arg(format!("{}/", project_dir.to_string_lossy()))
+        .arg(format!("{}/", project_dir.to_string()))
         .arg(format!("{}:{}", build_server, build_path))
         .env("LC_ALL", "C.UTF-8")
         .stdout(Stdio::inherit())
