@@ -94,12 +94,20 @@ fn main() {
         })
         .collect();
 
+    // Run it once redirecting logs to terminal to ensure if something needs to be installed, user
+    // sees it.
+    Command::new("cargo")
+        .args(&["metadata", "--no-deps", "--format-version", "1"])
+        .stderr(Stdio::inherit())
+        .output()
+        .unwrap_or_else(|e| {
+            error!("Failed to run cargo command remotely (error: {})", e);
+            exit(-5);
+        });
+    // Now run it again to get the workspace_root.
     let manifest_path = extract_manifest_path(&args.command).unwrap_or("Cargo.toml".to_string());
     let mut metadata_cmd = cargo_metadata::MetadataCommand::new();
-    metadata_cmd
-        .manifest_path(manifest_path)
-        .no_deps()
-        .other_options(&["--offline".to_string()]);
+    metadata_cmd.manifest_path(manifest_path).no_deps();
     let project_metadata = metadata_cmd.exec().unwrap();
     let project_dir = project_metadata.workspace_root;
 
@@ -165,7 +173,7 @@ fn main() {
     } else {
         build_command
     };
-    let _output = Command::new("ssh")
+    Command::new("ssh")
         .env("LC_ALL", "C.UTF-8")
         .args(&["-p", &remote.ssh_port.to_string()])
         .arg("-t")
