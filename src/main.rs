@@ -93,9 +93,12 @@ fn main() {
         })
         .collect();
 
+    let manifest_path = extract_manifest_path(&args.command).unwrap_or("Cargo.toml".to_string());
     let mut metadata_cmd = cargo_metadata::MetadataCommand::new();
-    metadata_cmd.manifest_path("Cargo.toml").no_deps();
-
+    metadata_cmd
+        .manifest_path(manifest_path)
+        .no_deps()
+        .other_options(&["--offline".to_string()]);
     let project_metadata = metadata_cmd.exec().unwrap();
     let project_dir = project_metadata.workspace_root;
 
@@ -251,4 +254,40 @@ fn main() {
             exit(-6);
         }
     }
+}
+
+fn extract_manifest_path(args: &[String]) -> Option<String> {
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        if arg == "--manifest-path" {
+            return args.next().cloned();
+        } else if arg.starts_with("--manifest-path=") {
+            return Some(arg.splitn(2, '=').nth(1).unwrap().to_string());
+        }
+    }
+    None
+}
+
+#[test]
+fn extract_manifest_path_works() {
+    // Test next arg
+    let args = vec![
+        "build".to_string(),
+        "--release".to_string(),
+        "--manifest-path".to_string(),
+        "Cargo.toml".to_string(),
+    ];
+    assert_eq!(extract_manifest_path(&args), Some("Cargo.toml".to_string()));
+
+    // Test equals
+    let args = vec![
+        "build".to_string(),
+        "--release".to_string(),
+        "--manifest-path=Cargo.toml".to_string(),
+    ];
+    assert_eq!(extract_manifest_path(&args), Some("Cargo.toml".to_string()));
+
+    // Test none
+    let args = vec!["build".to_string(), "--release".to_string()];
+    assert_eq!(extract_manifest_path(&args), None);
 }
