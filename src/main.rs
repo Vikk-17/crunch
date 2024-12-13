@@ -6,7 +6,6 @@ use clap::{command, Parser};
 use env_logger;
 use log::{debug, error, info};
 use std::{
-    hash::{DefaultHasher, Hash, Hasher},
     process::{exit, Command, Stdio},
     sync::{Arc, Mutex},
     thread,
@@ -121,9 +120,7 @@ fn main() {
 
     let build_server = remote.host;
 
-    let mut hasher = DefaultHasher::new();
-    project_dir.hash(&mut hasher);
-    let build_path = format!("{}/{}/", remote.temp_dir, hasher.finish());
+    let build_path = project_dir.clone();
 
     info!("Transferring sources to remote: {}", build_path);
     let mut rsync_to = Command::new("rsync");
