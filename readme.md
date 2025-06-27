@@ -2,7 +2,9 @@
 
 ![Crates.io Version](https://img.shields.io/crates/v/crunch-app)
 
-`crunch` is a drop-in `cargo` replacement for offloading Rust compilation to a remote server. Cut compile times and iterate faster!
+`crunch` is a drop-in `cargo` replacement for offloading Rust compilation to a remote server.
+
+Cut compile times and iterate faster!
 
 ## Usage
 
