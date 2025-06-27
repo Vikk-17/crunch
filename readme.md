@@ -2,9 +2,7 @@
 
 ![Crates.io Version](https://img.shields.io/crates/v/crunch-app)
 
-Turbocharge your Rust workflow.
-
-`crunch` seamlessly executes `cargo` commands on powerful remote hardware. Cut compile times and iterate faster!
+`crunch` is a drop-in `cargo` replacement for offloading Rust compilation to a remote server. Cut compile times and iterate faster!
 
 ## Usage
 
@@ -120,3 +118,7 @@ EXAMPLES:
 
 - Just replace `cargo` with `crunch`
 - Minimal configuration (just set a host in `~/.ssh/config`)
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=liamaharon/crunch-cli&type=Date)](https://www.star-history.com/#liamaharon/crunch-cli&Date)
