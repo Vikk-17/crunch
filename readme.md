@@ -1,4 +1,4 @@
-# crunch-cli
+# crunch
 
 ![Crates.io Version](https://img.shields.io/crates/v/crunch-app)
 
