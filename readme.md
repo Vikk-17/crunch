@@ -103,6 +103,16 @@ Options:
 
           Example: `--copy-back "./target/release/cuter-cat.png:.,*.bin:~/my-bins"`
 
+      --remote-path <REMOTE_PATH>
+          Specify the remote path behavior for builds
+
+          [default: mirror]
+
+          Possible values:
+          - mirror: Mirror the local directory structure on the remote server (default)
+          - tmp:    Use a temporary directory that is cleaned up after the build
+          - unique: Use a unique persistent directory in the user's home directory for each project
+
   -h, --help
           Print help (see a summary with '-h')
 
