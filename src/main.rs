@@ -2,8 +2,8 @@
 //!
 //! crunch seamlessly integrates cutting-edge hardware into your local development environment.
 
+use cargo_metadata::camino::Utf8PathBuf;
 use clap::{command, Parser, ValueEnum};
-use env_logger;
 use log::{debug, error, info};
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
@@ -12,24 +12,23 @@ use std::{
     thread,
     time::{SystemTime, UNIX_EPOCH},
 };
-use cargo_metadata::camino::Utf8PathBuf;
 
 #[derive(Debug, Clone)]
 pub struct Remote {
     pub name: String,
     pub host: String,
     pub ssh_port: u16,
-    pub temp_dir: String,
+    pub crunch_dir: String,
     pub env: String,
 }
 
 #[derive(Debug, Clone, ValueEnum)]
 enum RemotePathBehavior {
-    /// Mirror the local directory structure on the remote server (default)
+    /// Mirror the local directory structure on the remote server.
     Mirror,
-    /// Use a temporary directory on the remote server that cleans up afterwards
+    /// Create a directory in /tmp that is cleaned up when crunch finishes.
     Tmp,
-    /// Use a unique persistent directory in the user's home directory for each project
+    /// Use ~/crunch-builds.
     Unique,
 }
 
@@ -77,7 +76,7 @@ struct Args {
     #[arg(long = "copy-back", required = false, value_delimiter = ',')]
     copy_back: Vec<String>,
 
-    /// Specify the remote path behavior for builds
+    /// Where crunch should place the project on the remote server.
     #[arg(long = "remote-path", required = false, default_value = "mirror")]
     remote_path: RemotePathBehavior,
 
@@ -110,7 +109,7 @@ fn main() {
             match (parts.next(), parts.next()) {
                 (Some(source), Some(dest)) => Some((source.to_string(), dest.to_string())),
                 _ => {
-                    panic!("Invalid format for --copy-back entry: {}", entry);
+                    panic!("Invalid format for --copy-back entry: {entry}");
                 }
             }
         })
@@ -119,13 +118,14 @@ fn main() {
     // Run it once redirecting logs to terminal to ensure if something needs to be installed, user
     // sees it.
     Command::new("cargo")
-        .args(&["metadata", "--no-deps", "--format-version", "1"])
+        .args(["metadata", "--no-deps", "--format-version", "1"])
         .stderr(Stdio::inherit())
         .output()
         .unwrap_or_else(|e| {
             error!("Failed to run cargo command remotely (error: {})", e);
             exit(-5);
         });
+
     // Now run it again to get the workspace_root.
     let manifest_path = extract_manifest_path(&args.command).unwrap_or("Cargo.toml".to_string());
     let mut metadata_cmd = cargo_metadata::MetadataCommand::new();
@@ -137,7 +137,7 @@ fn main() {
         name: "crunch".to_string(),
         host: "crunch".to_string(),
         ssh_port: 22,
-        temp_dir: "~/crunch-builds".to_string(),
+        crunch_dir: "~/crunch-builds".to_string(),
         env: "~/.profile".to_string(),
     };
 
@@ -153,7 +153,7 @@ fn main() {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_nanos();
-            let temp_path = format!("/tmp/crunch-{}-{}", project_name, uid);
+            let temp_path = format!("/tmp/crunch-{project_name}-{uid}");
             info!("Using temporary directory: {}", temp_path);
             temp_path
         }
@@ -162,7 +162,7 @@ fn main() {
                 .file_name()
                 .expect("Project dir should always exist");
             let uid = uid_from_path(&project_dir);
-            let unique_path = format!("~/crunch-builds/{}-{}", project_name, uid);
+            let unique_path = format!("{}/{}-{}", remote.crunch_dir, project_name, uid);
 
             debug!("Using unique persistent directory: {}", unique_path);
             unique_path
@@ -170,12 +170,10 @@ fn main() {
         RemotePathBehavior::Mirror => project_dir.to_string(),
     };
 
-    debug!("Using build path: {}", build_path);
-
     info!("Transferring sources to remote: {}", build_path);
     let mut rsync_to = Command::new("rsync");
     rsync_to
-        .arg("-a".to_owned())
+        .arg("-a")
         .arg("--delete")
         .arg("--compress")
         .arg("-e")
@@ -188,13 +186,13 @@ fn main() {
         rsync_to.arg("--exclude").arg(exclude);
     });
 
-    let rsync_path_arg = format!("mkdir -p {} && rsync", build_path);
+    let rsync_path_arg = format!("mkdir -p {build_path} && rsync");
 
     rsync_to
         .arg("--rsync-path")
         .arg(rsync_path_arg)
-        .arg(format!("{}/", project_dir.to_string()))
-        .arg(format!("{}:{}", build_server, build_path))
+        .arg(format!("{project_dir}/"))
+        .arg(format!("{build_server}:{build_path}"))
         .env("LC_ALL", "C.UTF-8")
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
@@ -216,15 +214,14 @@ fn main() {
     // Add the post_cargo command to the build_command, if it exists
     let command = if let Some(post_cargo) = args.post_cargo {
         format!(
-            "{} && echo Executing post-cargo command && {}",
-            build_command, post_cargo
+            "{build_command} && echo Executing post-cargo command && {post_cargo}"
         )
     } else {
         build_command
     };
     Command::new("ssh")
         .env("LC_ALL", "C.UTF-8")
-        .args(&["-p", &remote.ssh_port.to_string()])
+        .args(["-p", &remote.ssh_port.to_string()])
         .arg("-t")
         .arg(&build_server)
         .arg(command)
@@ -259,7 +256,7 @@ fn main() {
                             "{}:{}/{}",
                             &build_server, build_path, remote_source
                         ))
-                        .arg(format!("{}/", local_dest))
+                        .arg(format!("{local_dest}/"))
                         .env("LC_ALL", "C.UTF-8")
                         .stdout(Stdio::inherit())
                         .stderr(Stdio::inherit())
@@ -284,8 +281,7 @@ fn main() {
                         }
                         Err(e) => {
                             let message = format!(
-                                "Failed to transfer '{}' to '{}' (error: {})",
-                                remote_source, local_dest, e
+                                "Failed to transfer '{remote_source}' to '{local_dest}' (error: {e})"
                             );
                             error!("{}", message);
                             errors.lock().unwrap().push(message);
@@ -302,7 +298,7 @@ fn main() {
         let errors = errors.lock().unwrap();
         if !errors.is_empty() {
             for error in errors.iter() {
-                eprintln!("{}", error);
+                eprintln!("{error}");
             }
             exit(-6);
         }
@@ -313,11 +309,10 @@ fn main() {
         info!("Cleaning up temporary directory on remote server...");
 
         let cleanup_result = Command::new("ssh")
-            .args(&["-p", &remote.ssh_port.to_string()])
+            .args(["-p", &remote.ssh_port.to_string()])
             .arg(&build_server)
             .arg(format!(
-                "cd '{}' && cargo clean && rm -r '{}'",
-                build_path, build_path
+                "cd '{build_path}' && cargo clean && rm -r '{build_path}'"
             ))
             .output();
 
@@ -348,7 +343,7 @@ fn extract_manifest_path(args: &[String]) -> Option<String> {
         if arg == "--manifest-path" {
             return args.next().cloned();
         } else if arg.starts_with("--manifest-path=") {
-            return Some(arg.splitn(2, '=').nth(1).unwrap().to_string());
+            return Some(arg.split_once('=').unwrap().1.to_string());
         }
     }
     None
